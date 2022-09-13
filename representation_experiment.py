@@ -21,13 +21,14 @@ import sklearn.metrics
 
 # HYPERPARAMETER_OPTIONS contain the hyperparameter options to do a grid search over:
 HYPERPARAMETER_OPTIONS = {
-    "ngram_range": [(1, 1), (2, 2), (3, 3), (4, 4), (1, 3)], # Which set of n-grams to include
-    "normalization": ["none", "tf", "tfidf"] # The normalization to apply 
+    # Which set of n-grams to include
+    "ngram_range": [(1, 1), (2, 2), (3, 3), (4, 4), (1, 3)],
+    "normalization": ["none", "tf", "tfidf"]  # The normalization to apply
 }
 
 # AMINO_ACIDS is the vocabulary used to construct the features.
 # These correspond to the FASTA format symbols, except for
-# pyrrolysine and selenocysteine (which do not appear in the dataset) 
+# pyrrolysine and selenocysteine (which do not appear in the dataset)
 # and special characters, which are ignored.
 AMINO_ACIDS = "AGSTNQVILMFYWHPKREDC"
 
@@ -45,8 +46,17 @@ HOLDOUT_SET_SIZE = 0.1
 # CROSSVALIDATION_FOLDS is the number of folds to use.
 CROSSVALIDATION_FOLDS = 10
 
+# EXPERIMENT_METRICS are the accuracy metrics shown when the experiment is finished (see representation-results.csv)
+EXPERIMENT_METRICS = ['train-accuracy', 'validation-accuracy']
+
+# SORT_METRIC is the accuracy metric to rank results by (only used for displaying results)
+SORT_METRIC = 'validation-accuracy'
+
+
 # To ensure features appear in the same order,
 # we provide a helper to compute the vocabulary for the n-gram representation:
+
+
 def feature_names_for_ngram_range(vocabulary: str, ngram_range: Tuple[int, int]) -> List[str]:
     """
     feature_names_for_ngram_range returns the set of possible n-grams
@@ -66,7 +76,7 @@ def make_classifier():
     """
     make_classifier returns the classifier used to compare the representations.
     """
-    return sklearn.ensemble.RandomForestClassifier(max_depth=3)
+    return sklearn.ensemble.AdaBoostClassifier()
 
 
 def hyperparameter_grid(choices: dict) -> dict:
@@ -95,7 +105,7 @@ def run_sweep(sweep: dict, X_train: pd.Series, y_train: pd.Series, X_validation:
             use_idf=(sweep['normalization'] == 'tfidf')
         )))
     pipeline = sklearn.pipeline.Pipeline(transform_steps)
-    X_train_t = pipeline.fit_transform(X_train)
+    X_train_t = pipeline.fit_transform(X_train).toarray()
 
     clf = make_classifier()
     clf.fit(X_train_t, y_train)
@@ -103,7 +113,7 @@ def run_sweep(sweep: dict, X_train: pd.Series, y_train: pd.Series, X_validation:
     results['train'] = sklearn.metrics.classification_report(
         y_train, y_pred, output_dict=True)
 
-    X_validation_t = pipeline.transform(X_validation)
+    X_validation_t = pipeline.transform(X_validation).toarray()
     y_pred = clf.predict(X_validation_t)
     results['validation'] = sklearn.metrics.classification_report(
         y_validation, y_pred, output_dict=True)
@@ -111,6 +121,8 @@ def run_sweep(sweep: dict, X_train: pd.Series, y_train: pd.Series, X_validation:
 
 
 def main(args):
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
     dataset = pd.read_csv(args.datapath, names=(
         "Classification", "Label", "Sequence"))
 
@@ -120,9 +132,8 @@ def main(args):
     kfold = sklearn.model_selection.StratifiedKFold(
         n_splits=CROSSVALIDATION_FOLDS, shuffle=True, random_state=RANDOM_SEED)
 
-    experiment_results = []
-    for sweep in hyperparameter_grid(HYPERPARAMETER_OPTIONS):
-        sweep_results = []
+    folds = []
+    for sweep_idx, sweep in enumerate(hyperparameter_grid(HYPERPARAMETER_OPTIONS)):
         for fold_idx, (train_indices, validation_indices) in enumerate(kfold.split(X_cv, y_cv)):
             logging.debug(f"Running fold {fold_idx}")
             X_train, y_train = X_cv.iloc[train_indices], y_cv.iloc[train_indices]
@@ -130,12 +141,30 @@ def main(args):
 
             fold_results = run_sweep(
                 sweep, X_train, y_train, X_validation, y_validation)
-            sweep_results.append(fold_results)
-        experiment_results.append({'params': sweep, 'results': sweep_results})
 
-    with open(args.results, 'w') as result_file:
-        json.dump(experiment_results, result_file)
-    return
+            fold_results['fold'] = fold_idx
+            fold_results['params'] = sweep
+            fold_results['sweep_id'] = sweep_idx
+
+            folds.append(pd.json_normalize(fold_results, sep="-"))
+
+    results = pd.concat(folds)
+    logging.info(f"Saving results to {args.results}")
+    results.to_csv(args.results)
+
+    logging.info(f"Sweeps sorted by {SORT_METRIC}:")
+
+    # Group the results by sweeps, calculate the mean and standard deviation of the
+    # metrics in EXPERIMENT_METRICS, then sort the results by descending mean of the specified
+    # metric (the validation accuracy by default)
+    result_frame = results.groupby(['sweep_id'])[EXPERIMENT_METRICS].agg(
+        [np.mean, np.std]).sort_values((SORT_METRIC, 'mean'), ascending=False)
+
+    # For convenience's sake, include the hyperparameter configuration with each sweep: 
+    param_frame = results.groupby('sweep_id').first(
+    )[results.columns[results.columns.str.startswith('params')]]
+
+    print(result_frame.join(param_frame))
 
 
 if __name__ == '__main__':
@@ -143,7 +172,9 @@ if __name__ == '__main__':
         description="Compare representations for the PsychOrNot classifier.")
     parser.add_argument("--datapath", default="dataset/database-pdb.csv",
                         help="The path to the .CSV with the experiment data.")
-    parser.add_argument("--results", default="representation-results.json",
+    parser.add_argument("--results", default="representation-results.csv",
                         help="Where to save the results of the representation comparison.")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Log results to the console.")
     args = parser.parse_args()
     main(args)
