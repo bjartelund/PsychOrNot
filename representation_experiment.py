@@ -76,7 +76,7 @@ def make_classifier():
     """
     make_classifier returns the classifier used to compare the representations.
     """
-    return sklearn.ensemble.AdaBoostClassifier()
+    return sklearn.ensemble.RandomForestClassifier(max_depth=3)
 
 
 def hyperparameter_grid(choices: dict) -> dict:
