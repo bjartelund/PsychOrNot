@@ -18,12 +18,16 @@ import sklearn.pipeline
 import sklearn.ensemble
 import sklearn.model_selection
 import sklearn.metrics
+import sklearn.svm
+import sklearn.neighbors
+import sklearn.linear_model
 
 # HYPERPARAMETER_OPTIONS contain the hyperparameter options to do a grid search over:
 HYPERPARAMETER_OPTIONS = {
+    "architecture": ['svm', 'rf', 'knn', 'lr'],
     # Which set of n-grams to include
-    "ngram_range": [(1, 1), (2, 2), (3, 3), (4, 4), (1, 3)],
-    "normalization": ["none", "tf", "tfidf"]  # The normalization to apply
+    "ngram_range": [(1, 1), (2, 2), (3, 3), (4, 4), (1,2), (1, 3)],
+    "normalization": ["none", "tf", "tfidf"],  # The normalization to apply
 }
 
 # AMINO_ACIDS is the vocabulary used to construct the features.
@@ -52,11 +56,8 @@ EXPERIMENT_METRICS = ['train-accuracy', 'validation-accuracy']
 # SORT_METRIC is the accuracy metric to rank results by (only used for displaying results)
 SORT_METRIC = 'validation-accuracy'
 
-
 # To ensure features appear in the same order,
 # we provide a helper to compute the vocabulary for the n-gram representation:
-
-
 def feature_names_for_ngram_range(vocabulary: str, ngram_range: Tuple[int, int]) -> List[str]:
     """
     feature_names_for_ngram_range returns the set of possible n-grams
@@ -72,12 +73,19 @@ def feature_names_for_ngram_range(vocabulary: str, ngram_range: Tuple[int, int])
     return features
 
 
-def make_classifier():
+def make_classifier(sweep: dict):
     """
     make_classifier returns the classifier used to compare the representations.
     """
-    return sklearn.ensemble.RandomForestClassifier(max_depth=3)
-
+    arch = sweep['architecture']
+    if arch == 'rf':
+        return sklearn.ensemble.RandomForestClassifier(max_depth=3)
+    elif arch == 'svm':
+        return sklearn.svm.SVC()
+    elif arch == 'knn':
+        return sklearn.neighbors.KNeighborsClassifier()
+    elif arch == 'lr':
+        return sklearn.linear_model.LogisticRegression()
 
 def hyperparameter_grid(choices: dict) -> dict:
     """
@@ -107,7 +115,7 @@ def run_sweep(sweep: dict, X_train: pd.Series, y_train: pd.Series, X_validation:
     pipeline = sklearn.pipeline.Pipeline(transform_steps)
     X_train_t = pipeline.fit_transform(X_train).toarray()
 
-    clf = make_classifier()
+    clf = make_classifier(sweep)
     clf.fit(X_train_t, y_train)
     y_pred = clf.predict(X_train_t)
     results['train'] = sklearn.metrics.classification_report(
