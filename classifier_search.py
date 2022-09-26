@@ -29,6 +29,8 @@ import keras_tuner.tuners
 import keras_tuner_cv.inner_cv
 import keras_tuner_cv.utils
 
+import random
+
 def build_input_pipeline():
     transform_steps = [('vectorize', sklearn.feature_extraction.text.CountVectorizer(
         analyzer='char',
@@ -41,19 +43,29 @@ def build_input_pipeline():
     return sklearn.pipeline.Pipeline(transform_steps)
 
 def build_model(hp):
-    model = tf.keras.Sequential([
-        tf.keras.Input(shape=(400,))])
+    # Since we ensemble these models later in construct_ensemble
+    # and Keras requires unique model names,
+    # assign a random identifier to avoid renaming them later
+    model = keras.Sequential([
+        keras.Input(shape=(400,))], name=f"sequential_{random.randint(0, 2**31)}")
     
     for i in range(hp.Int("layers", 1, 3)):
-        model.add(tf.keras.layers.Dense(units=hp.Int(f"units_{i}", min_value=32, max_value=512, step=32), activation='relu'))
+        model.add(keras.layers.Dense(units=hp.Int(f"units_{i}", min_value=32, max_value=512, step=32), activation='relu'))
     
     # Add the prediction head:
-    model.add(tf.keras.layers.Dense(1, activation='sigmoid'))
+    model.add(keras.layers.Dense(1, activation='sigmoid'))
 
-    model.compile(optimizer=tf.keras.optimizers.RMSprop(),
-                loss=tf.keras.losses.BinaryCrossentropy(),
+    model.compile(optimizer=keras.optimizers.RMSprop(),
+                loss=keras.losses.BinaryCrossentropy(),
                 metrics=['accuracy'])
     
+    return model
+
+def construct_ensemble(models):
+    input_layer = keras.Input(shape=(400,))
+    linked_models = [model(input_layer) for model in models]
+    out = keras.layers.Average()(linked_models)
+    model = keras.Model(inputs=input_layer, outputs=out)
     return model
 
 # AMINO_ACIDS is the vocabulary used to construct the features.
@@ -75,13 +87,6 @@ HOLDOUT_SET_SIZE = 0.1
 
 # CROSSVALIDATION_FOLDS is the number of folds to use.
 CROSSVALIDATION_FOLDS = 10
-
-# EXPERIMENT_METRICS are the accuracy metrics shown when the experiment is finished (see representation-results.csv)
-EXPERIMENT_METRICS = ['train-accuracy', 'validation-accuracy']
-
-# SORT_METRIC is the accuracy metric to rank results by (only used for displaying results)
-SORT_METRIC = 'validation-accuracy'
-
 
 # To ensure features appear in the same order,
 # we provide a helper to compute the vocabulary for the n-gram representation:
@@ -113,32 +118,43 @@ def main(args):
     kfold = sklearn.model_selection.StratifiedKFold(
         n_splits=CROSSVALIDATION_FOLDS, shuffle=True, random_state=RANDOM_SEED)
 
-    X_train, X_validation, y_train, y_validation = sklearn.model_selection.train_test_split(
-        X_cv, y_cv, shuffle=True, test_size=0.2
-    )
-
     pipeline = build_input_pipeline()
-    X_train_t = pipeline.fit_transform(X_train).toarray()
-    X_validation_t = pipeline.transform(X_validation).toarray()
+    X_cv_t = pipeline.fit_transform(X_cv).toarray()
 
     parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
         build_model,
         kfold,
         objective="val_accuracy",
-        max_trials=3,
-        executions_per_trial=2,
+        max_trials=10,
         overwrite=True,
         directory="classifier_search",
         project_name="psychornot",
         save_history=True,
-        save_output=True,
+        save_output=True
     )
 
-    parameter_tuner.search(X_train_t, y_train, epochs=10, validation_data=(X_validation_t, y_validation))
+    parameter_tuner.search(X_cv_t, y_cv, epochs=10)
 
     df = keras_tuner_cv.utils.pd_inner_cv_get_result(parameter_tuner)
     print(df.head())
     df.to_csv(args.results)
+
+    best_models = parameter_tuner.get_best_models(num_models=1)
+    best_ensemble = construct_ensemble(best_models[0])
+    best_ensemble.build(input_shape=(400,))
+    best_ensemble.compile(optimizer=keras.optimizers.RMSprop(),
+                loss=keras.losses.BinaryCrossentropy(),
+                metrics=['accuracy'])
+    best_ensemble.save(args.model)
+    
+    X_holdout_t = pipeline.transform(X_holdout).toarray()
+    print("Final holdout test set accuracy:")
+    best_ensemble.evaluate(X_holdout_t, y_holdout)
+    y_holdout_predictions = np.round(best_ensemble.predict(X_holdout_t))
+    classification_report = sklearn.metrics.classification_report(y_holdout, y_holdout_predictions, digits=3)
+    print(classification_report)
+    
+
 
 
 if __name__ == '__main__':
@@ -147,7 +163,9 @@ if __name__ == '__main__':
     parser.add_argument("--datapath", default="dataset/database-pdb.csv",
                         help="The path to the .CSV with the experiment data.")
     parser.add_argument("--results", default="classification-results.csv",
-                        help="Where to save the results of the representation comparison.")
+                        help="Where to save the results of the classifier search.")
+    parser.add_argument("--model", default="psychornot-ensemble",
+                        help="Where to save the ensemble of the best performing models.")
     parser.add_argument("--verbose", action="store_true",
                         help="Log results to the console.")
     args = parser.parse_args()
