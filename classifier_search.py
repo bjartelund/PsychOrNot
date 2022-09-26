@@ -132,11 +132,13 @@ def main(args):
     pipeline = build_input_pipeline()
     X_cv_t = pipeline.fit_transform(X_cv).toarray()
 
-    parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
+    parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.Hyperband)(
         build_model,
         kfold,
+        max_epochs=100,
+        factor = 3,
+        hyperband_iterations = 5,
         objective="val_accuracy",
-        max_trials=10,
         overwrite=True,
         directory="classifier_search",
         project_name="psychornot",
@@ -144,7 +146,8 @@ def main(args):
         save_output=True
     )
 
-    parameter_tuner.search(X_cv_t, y_cv, epochs=10)
+    stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+    parameter_tuner.search(X_cv_t, y_cv, epochs=100, callbacks=[stop_early])
 
     df = keras_tuner_cv.utils.pd_inner_cv_get_result(parameter_tuner)
     print(df.head())
