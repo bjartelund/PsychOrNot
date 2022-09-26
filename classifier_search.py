@@ -31,16 +31,19 @@ import keras_tuner_cv.utils
 
 import random
 
+
 def build_input_pipeline():
     transform_steps = [('vectorize', sklearn.feature_extraction.text.CountVectorizer(
         analyzer='char',
         lowercase=False,
-        ngram_range=(2,2),
+        ngram_range=(2, 2),
         vocabulary=feature_names_for_ngram_range(
-            AMINO_ACIDS, (2,2))
+            AMINO_ACIDS, (2, 2))
     ))]
-    transform_steps.append(('normalize', sklearn.feature_extraction.text.TfidfTransformer(use_idf=True)))
+    transform_steps.append(
+        ('normalize', sklearn.feature_extraction.text.TfidfTransformer(use_idf=True)))
     return sklearn.pipeline.Pipeline(transform_steps)
+
 
 def build_model(hp):
     # Since we ensemble these models later in construct_ensemble
@@ -48,18 +51,20 @@ def build_model(hp):
     # assign a random identifier to avoid renaming them later
     model = keras.Sequential([
         keras.Input(shape=(400,))], name=f"sequential_{random.randint(0, 2**31)}")
-    
+
     for i in range(hp.Int("layers", 1, 3)):
-        model.add(keras.layers.Dense(units=hp.Int(f"units_{i}", min_value=32, max_value=512, step=32), activation='relu'))
-    
+        model.add(keras.layers.Dense(units=hp.Int(
+            f"units_{i}", min_value=32, max_value=512, step=32), activation='relu'))
+
     # Add the prediction head:
     model.add(keras.layers.Dense(1, activation='sigmoid'))
 
     model.compile(optimizer=keras.optimizers.RMSprop(),
-                loss=keras.losses.BinaryCrossentropy(),
-                metrics=['accuracy'])
-    
+                  loss=keras.losses.BinaryCrossentropy(),
+                  metrics=['accuracy'])
+
     return model
+
 
 def construct_ensemble(models):
     input_layer = keras.Input(shape=(400,))
@@ -67,6 +72,7 @@ def construct_ensemble(models):
     out = keras.layers.Average()(linked_models)
     model = keras.Model(inputs=input_layer, outputs=out)
     return model
+
 
 # AMINO_ACIDS is the vocabulary used to construct the features.
 # These correspond to the FASTA format symbols, except for
@@ -106,6 +112,7 @@ def feature_names_for_ngram_range(vocabulary: str, ngram_range: Tuple[int, int])
                      for c in itertools.product(vocabulary, repeat=n)]
     return features
 
+
 def main(args):
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -143,18 +150,17 @@ def main(args):
     best_ensemble = construct_ensemble(best_models[0])
     best_ensemble.build(input_shape=(400,))
     best_ensemble.compile(optimizer=keras.optimizers.RMSprop(),
-                loss=keras.losses.BinaryCrossentropy(),
-                metrics=['accuracy'])
+                          loss=keras.losses.BinaryCrossentropy(),
+                          metrics=['accuracy'])
     best_ensemble.save(args.model)
-    
+
     X_holdout_t = pipeline.transform(X_holdout).toarray()
     print("Final holdout test set accuracy:")
     best_ensemble.evaluate(X_holdout_t, y_holdout)
     y_holdout_predictions = np.round(best_ensemble.predict(X_holdout_t))
-    classification_report = sklearn.metrics.classification_report(y_holdout, y_holdout_predictions, digits=3)
+    classification_report = sklearn.metrics.classification_report(
+        y_holdout, y_holdout_predictions, digits=3)
     print(classification_report)
-    
-
 
 
 if __name__ == '__main__':
