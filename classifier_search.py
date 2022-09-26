@@ -2,15 +2,12 @@
 PsychOrNot - Experiment 2
 
 """
-
-from distutils.command.build import build
-from platform import architecture
 from typing import List, Tuple
 
 import itertools
 import argparse
 import logging
-import json
+import random
 
 import pandas as pd
 import numpy as np
@@ -28,8 +25,6 @@ import keras_tuner
 import keras_tuner.tuners
 import keras_tuner_cv.inner_cv
 import keras_tuner_cv.utils
-
-import random
 
 
 def build_input_pipeline():
@@ -52,9 +47,18 @@ def build_model(hp):
     model = keras.Sequential([
         keras.Input(shape=(400,))], name=f"sequential_{random.randint(0, 2**31)}")
 
+    regularization = hp.Choice('regularization', ['none', 'l1', 'l2'])
+    if regularization == 'none':
+        regularization = None
+
     for i in range(hp.Int("layers", 1, 3)):
         model.add(keras.layers.Dense(units=hp.Int(
-            f"units_{i}", min_value=32, max_value=512, step=32), activation='relu'))
+            f"units_{i}", min_value=32, max_value=512, step=32), 
+            activation=hp.Choice("activation", ["relu", "sigmoid"]),
+            kernel_regularizer=regularization,
+            bias_regularizer=regularization))
+
+    model.add(keras.layers.Dropout(rate=hp.Float('dropout', min_value=0.0, max_value=0.5, step=0.05)))
 
     # Add the prediction head:
     model.add(keras.layers.Dense(1, activation='sigmoid'))
