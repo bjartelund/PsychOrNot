@@ -63,7 +63,18 @@ def build_model(hp):
     # Add the prediction head:
     model.add(keras.layers.Dense(1, activation='sigmoid'))
 
-    model.compile(optimizer=keras.optimizers.RMSprop(),
+    optimizer_choice = hp.Choice('optimizer', ['sgd', 'adam', 'rmsprop'])
+    lr = hp.Float('learning-rate', max_value=1.0, min_value=1e-5, sampling='log')
+
+    if optimizer_choice == 'sgd':
+        optimizer = keras.optimizers.SGD(learning_rate=lr)
+    elif optimizer_choice == 'adam':
+        optimizer = keras.optimizers.Adam(learning_rate=lr)
+    elif optimizer_choice == 'rmsprop':
+        optimizer = keras.optimizers.RMSprop(learning_rate=lr)
+
+
+    model.compile(optimizer=optimizer,
                   loss=keras.losses.BinaryCrossentropy(),
                   metrics=['accuracy'])
 
@@ -135,7 +146,7 @@ def main(args):
     parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
         build_model,
         kfold,
-        max_trials=10000,
+        max_trials=100,
         objective="val_accuracy",
         overwrite=True,
         directory="classifier_search",
