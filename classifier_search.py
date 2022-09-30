@@ -148,8 +148,12 @@ def main(args):
         n_splits=CROSSVALIDATION_FOLDS, shuffle=True, random_state=RANDOM_SEED)
 
     pipeline = build_input_pipeline()
-    
     X_cv_t = pipeline.fit_transform(X_cv).toarray()
+    
+    if args.pipeline:
+        logging.info("Writing pipeline to " + args.pipeline)
+        with open(args.pipeline, 'wb') as pipeline_file: 
+            pickle.dump(pipeline, pipeline_file)
 
     parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
         build_model,
