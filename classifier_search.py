@@ -8,6 +8,7 @@ import itertools
 import argparse
 import logging
 import random
+import pickle
 
 import pandas as pd
 import numpy as np
@@ -147,6 +148,7 @@ def main(args):
         n_splits=CROSSVALIDATION_FOLDS, shuffle=True, random_state=RANDOM_SEED)
 
     pipeline = build_input_pipeline()
+    
     X_cv_t = pipeline.fit_transform(X_cv).toarray()
 
     parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
@@ -193,6 +195,8 @@ if __name__ == '__main__':
                         help="The path to the .CSV with the experiment data.")
     parser.add_argument("--results", default="classification-results.csv",
                         help="Where to save the results of the classifier search.")
+    parser.add_argument("--pipeline", default="psychornot-pipeline",
+                        help="Where to save the preprocessing pipeline for the model.")
     parser.add_argument("--model", default="psychornot-ensemble",
                         help="Where to save the ensemble of the best performing models.")
     parser.add_argument("--logdir", default="logs",
