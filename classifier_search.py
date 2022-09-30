@@ -109,6 +109,12 @@ HOLDOUT_SET_SIZE = 0.1
 # CROSSVALIDATION_FOLDS is the number of folds to use.
 CROSSVALIDATION_FOLDS = 10
 
+# MAX_EPOCHS is the number of epochs to train each model for at most
+MAX_EPOCHS = 100
+
+# MAX_TRIALS is the number of hyperparameter configurations to try out.
+MAX_TRIALS = 1000
+
 # To ensure features appear in the same order,
 # we provide a helper to compute the vocabulary for the n-gram representation:
 
@@ -146,7 +152,7 @@ def main(args):
     parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
         build_model,
         kfold,
-        max_trials=100,
+        max_trials=MAX_TRIALS,
         objective="val_accuracy",
         overwrite=True,
         directory="classifier_search",
@@ -157,7 +163,7 @@ def main(args):
 
     stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
     board_logging = tf.keras.callbacks.TensorBoard(log_dir=args.logdir)
-    parameter_tuner.search(X_cv_t, y_cv, epochs=100, callbacks=[stop_early, board_logging])
+    parameter_tuner.search(X_cv_t, y_cv, epochs=MAX_EPOCHS, callbacks=[stop_early, board_logging])
 
     df = keras_tuner_cv.utils.pd_inner_cv_get_result(parameter_tuner)
     print(df.head())
