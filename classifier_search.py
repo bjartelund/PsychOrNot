@@ -58,12 +58,23 @@ def build_model(hp):
             kernel_regularizer=regularization,
             bias_regularizer=regularization))
 
-    model.add(keras.layers.Dropout(rate=hp.Float('dropout', min_value=0.0, max_value=0.5, step=0.05)))
+    model.add(keras.layers.Dropout(rate=hp.Float('dropout', min_value=0.0, max_value=0.2, step=0.05)))
 
     # Add the prediction head:
     model.add(keras.layers.Dense(1, activation='sigmoid'))
 
-    model.compile(optimizer=keras.optimizers.RMSprop(),
+    optimizer_choice = hp.Choice('optimizer', ['sgd', 'adam', 'rmsprop'])
+    lr = hp.Float('learning-rate', max_value=1.0, min_value=1e-5, sampling='log')
+
+    if optimizer_choice == 'sgd':
+        optimizer = keras.optimizers.SGD(learning_rate=lr)
+    elif optimizer_choice == 'adam':
+        optimizer = keras.optimizers.Adam(learning_rate=lr)
+    elif optimizer_choice == 'rmsprop':
+        optimizer = keras.optimizers.RMSprop(learning_rate=lr)
+
+
+    model.compile(optimizer=optimizer,
                   loss=keras.losses.BinaryCrossentropy(),
                   metrics=['accuracy'])
 
@@ -97,6 +108,12 @@ HOLDOUT_SET_SIZE = 0.1
 
 # CROSSVALIDATION_FOLDS is the number of folds to use.
 CROSSVALIDATION_FOLDS = 10
+
+# MAX_EPOCHS is the number of epochs to train each model for at most
+MAX_EPOCHS = 100
+
+# MAX_TRIALS is the number of hyperparameter configurations to try out.
+MAX_TRIALS = 1000
 
 # To ensure features appear in the same order,
 # we provide a helper to compute the vocabulary for the n-gram representation:
@@ -132,12 +149,10 @@ def main(args):
     pipeline = build_input_pipeline()
     X_cv_t = pipeline.fit_transform(X_cv).toarray()
 
-    parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.Hyperband)(
+    parameter_tuner = keras_tuner_cv.inner_cv.inner_cv(keras_tuner.tuners.RandomSearch)(
         build_model,
         kfold,
-        max_epochs=100,
-        factor = 3,
-        hyperband_iterations = 5,
+        max_trials=MAX_TRIALS,
         objective="val_accuracy",
         overwrite=True,
         directory="classifier_search",
@@ -147,7 +162,8 @@ def main(args):
     )
 
     stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
-    parameter_tuner.search(X_cv_t, y_cv, epochs=100, callbacks=[stop_early])
+    board_logging = tf.keras.callbacks.TensorBoard(log_dir=args.logdir)
+    parameter_tuner.search(X_cv_t, y_cv, epochs=MAX_EPOCHS, callbacks=[stop_early, board_logging])
 
     df = keras_tuner_cv.utils.pd_inner_cv_get_result(parameter_tuner)
     print(df.head())
@@ -179,6 +195,8 @@ if __name__ == '__main__':
                         help="Where to save the results of the classifier search.")
     parser.add_argument("--model", default="psychornot-ensemble",
                         help="Where to save the ensemble of the best performing models.")
+    parser.add_argument("--logdir", default="logs",
+                        help="Where to save the logs.")
     parser.add_argument("--verbose", action="store_true",
                         help="Log results to the console.")
     args = parser.parse_args()
